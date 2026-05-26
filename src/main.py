@@ -33,6 +33,21 @@ def _print_report(report: FinalReport) -> None:
             print(f"      Differentiators:   {comp.differentiators}")
             print(f"      Target advantages: {comp.target_advantages}")
             print(f"      Pricing delta:     {comp.pricing_delta}")
+            print(f"      Data confidence:   {comp.data_confidence}")
+
+    if report.stale_data_warnings:
+        print("\nStale Data Warnings")
+        print("-" * 70)
+        for w in report.stale_data_warnings:
+            print(f"  ! {w}")
+
+    if report.known_unknowns:
+        print("\nKnown Unknowns")
+        print("-" * 70)
+        for ku in report.known_unknowns:
+            print(f"  ? {ku}")
+
+    print(f"\n[Synthesis model: {report.synthesis_model_used}]")
     print()
 
 

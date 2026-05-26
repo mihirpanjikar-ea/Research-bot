@@ -1,4 +1,4 @@
-from typing import Annotated, Dict, List, Optional, TypedDict
+from typing import Annotated, Dict, List, Literal, Optional, TypedDict
 
 from pydantic import BaseModel, Field
 
@@ -32,6 +32,8 @@ class CompetitorComparison(BaseModel):
     differentiators: List[str] = Field(default_factory=list)
     target_advantages: List[str] = Field(default_factory=list)
     pricing_delta: str = ""
+    # Reflects data completeness after Stage 4 quality gate
+    data_confidence: Literal["high", "medium", "low", "known_unknown"] = "medium"
 
 
 class SWOTAnalysis(BaseModel):
@@ -46,6 +48,10 @@ class FinalReport(BaseModel):
     target_company: str = ""
     competitor_comparisons: List[CompetitorComparison] = Field(default_factory=list)
     swot: SWOTAnalysis = Field(default_factory=SWOTAnalysis)
+    # data-quality transparency fields surfaced by synthesis
+    stale_data_warnings: List[str] = Field(default_factory=list)
+    known_unknowns: List[str] = Field(default_factory=list)
+    synthesis_model_used: str = ""
 
 
 class IntelligenceState(TypedDict):

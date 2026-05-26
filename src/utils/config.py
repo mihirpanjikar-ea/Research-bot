@@ -16,3 +16,8 @@ STALE_SIGNAL_THRESHOLD_MONTHS = int(os.getenv("STALE_SIGNAL_THRESHOLD_MONTHS", 1
 
 # Shared extraction LLM (gpt-4o-mini, structured output)
 extraction_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+
+# Synthesis LLM: gpt-4o primary with gpt-4o-mini fallback
+_primary_synthesis_llm = ChatOpenAI(model="gpt-4o", temperature=0)
+_fallback_synthesis_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+synthesis_llm = _primary_synthesis_llm.with_fallbacks([_fallback_synthesis_llm])
