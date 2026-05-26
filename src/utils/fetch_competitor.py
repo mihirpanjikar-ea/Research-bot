@@ -1,22 +1,23 @@
 from langchain_exa import ExaFindSimilarResults
-from .models import ResearchState
+
+from .models import IntelligenceState
 
 find_similar_tool = ExaFindSimilarResults()
 
-def fetch_competitors(state: ResearchState) -> dict:
-    """Finds similar companies using the LangChain ExaFindSimilarResults tool."""
-    print("--- Finding competitors via langchain-exa ---")
-    
-    # As a LangChain Runnable, the tool accepts a dictionary of arguments
+MAX_COMPETITORS = 3
+
+
+def fetch_competitors(state: IntelligenceState) -> dict:
+    """Track A only: find_similar returns raw competitor URLs. No triage, no fallback."""
+    url = state["target_company_url"]
+    search_url = url if "://" in url else f"https://{url}"
+    print(f"--- Discovering competitors (Track A) for: {search_url} ---")
+
     response = find_similar_tool.invoke({
-        "url": state["target_url"],
-        "num_results": 3,
-        "text_contents_options": {"max_characters": 3000}
+        "url": search_url,
+        "num_results": MAX_COMPETITORS,
+        "exclude_source_domain": True,
     })
-    
-    competitor_data = ""
-    # The langchain-exa tool returns the Exa response object
-    for idx, result in enumerate(response.results):
-        competitor_data += f"\n\nCompetitor {idx + 1}: {result.url}\nContent: {result.text[:2000]}...\n"
-        
-    return {"competitor_info": competitor_data}
+
+    competitor_urls = [r.url for r in response.results]
+    return {"competitor_urls": competitor_urls}

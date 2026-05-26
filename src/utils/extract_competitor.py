@@ -8,18 +8,13 @@ search_tool = ExaSearchResults()
 extraction_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
 
 
-def fetch_target_company(state: IntelligenceState) -> dict:
-    """Scrape the target's homepage + about/pricing subpages, extract a CompanyProfile."""
-    url = state["target_company_url"]
-    print(f"--- Scraping target: {url} ---")
-
+def _extract_one(url: str) -> CompanyProfile:
     scrape_url = url if "://" in url else f"https://{url}"
-
     response = search_tool.client.get_contents(
         [scrape_url],
         text={"max_characters": 3000},
-        subpages=5,
-        subpage_target=["about", "pricing"],
+        subpages=3,
+        subpage_target=["about", "pricing", "features"],
     )
 
     if not response.results:
@@ -36,6 +31,21 @@ def fetch_target_company(state: IntelligenceState) -> dict:
     ])
 
     chain = prompt | extraction_llm.with_structured_output(CompanyProfile)
-    profile = chain.invoke({"url": url, "context": content})
+    return chain.invoke({"url": url, "context": content})
 
-    return {"target_profile": profile}
+
+def extract_competitors(state: IntelligenceState) -> dict:
+    """Sequentially scrape + extract each competitor URL into a CompanyProfile."""
+    urls = state.get("competitor_urls", [])
+    competitors_data: dict = {}
+
+    for url in urls:
+        print(f"--- Extracting competitor: {url} ---")
+        try:
+            profile = _extract_one(url)
+        except Exception as e:
+            print(f"Failed to extract {url}: {e}")
+            continue
+        competitors_data[url] = profile
+
+    return {"competitors_data": competitors_data}
