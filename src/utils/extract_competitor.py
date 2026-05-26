@@ -278,6 +278,10 @@ def quality_gate_node(state: IntelligenceState) -> dict:
                     "missing": ", ".join(missing),
                     "context": context,
                 })
+                # Normalize plain-dict outputs into the pydantic model for attribute access
+                if isinstance(missing_data, dict):
+                    missing_data = _MissingData.model_validate(missing_data)
+
                 if not profile.key_features and missing_data.key_features:
                     profile.key_features = missing_data.key_features
                 if not profile.pricing_model and missing_data.pricing_model:

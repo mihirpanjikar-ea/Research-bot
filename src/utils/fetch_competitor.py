@@ -144,7 +144,7 @@ def track_b_discovery_node(state: IntelligenceState) -> dict:
             ])
             chain = extract_prompt | extraction_llm.with_structured_output(CompetitorSeed)
             extracted = chain.invoke({"name": target_name, "corpus": article_corpus})
-            urls = extracted.competitor_urls or []
+            urls = (extracted.get("competitor_urls") or []) if isinstance(extracted, dict) else (extracted.competitor_urls or [])
     except Exception as e:
         print(f"Track B error: {e}")
 
@@ -182,7 +182,7 @@ def track_c_discovery_node(state: IntelligenceState) -> dict:
     try:
         chain = prompt | extraction_llm.with_structured_output(CompetitorSeed)
         res = chain.invoke({"name": target_name})
-        urls = res.competitor_urls or []
+        urls = res.get("competitor_urls", []) if isinstance(res, dict) else (res.competitor_urls or [])
     except Exception as e:
         print(f"Track C error: {e}")
         urls = []
@@ -265,7 +265,10 @@ def triage_node(state: IntelligenceState) -> dict:
     try:
         chain = triage_prompt | extraction_llm.with_structured_output(TriageDecision)
         decision = chain.invoke({"target": target_desc, "candidates": candidates_text})
-        selected = decision.direct_competitor_urls[:MAX_PARALLEL_COMPETITORS]
+        if isinstance(decision, dict):
+            selected = decision.get("direct_competitor_urls", [])[:MAX_PARALLEL_COMPETITORS]
+        else:
+            selected = decision.direct_competitor_urls[:MAX_PARALLEL_COMPETITORS]
     except Exception as e:
         print(f"LLM triage failed, falling back to score-ranked list: {e}")
         selected = [c["norm"] for c in scored[:MAX_PARALLEL_COMPETITORS]]

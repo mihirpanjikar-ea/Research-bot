@@ -1,5 +1,6 @@
 from typing import List
 
+from langchain_core.messages import AIMessage
 from langchain_core.prompts import ChatPromptTemplate
 
 from .config import synthesis_llm
@@ -8,14 +9,17 @@ from .models import FinalReport, IntelligenceState
 
 def analyze_and_compare(state: IntelligenceState) -> dict:
     """
-    Single synthesis pass: produce a structured FinalReport from target + competitor profiles.
+        Synthesis pass: produce a structured FinalReport from target + competitor profiles.
 
-    - Gathers stale_fields and conflict_fields from every profile and injects them
-      as explicit Stale Data Warnings into the prompt so the LLM acknowledges gaps.
-    - Identifies Known Unknowns (pricing or features still missing after quality gate)
-      and injects them so the LLM can call them out rather than hallucinate.
-    - Records which OpenAI model actually executed synthesis (primary vs fallback).
-    - Populates FinalReport.stale_data_warnings, .known_unknowns, .synthesis_model_used.
+        injects data-quality metadata (stale warnings, known unknowns,
+        conflict fields) into the prompt; stamps quality fields onto the
+        report; tracks which model executed via include_raw=True.
+
+        reads historical_context (prior draft summaries) and
+        remediation_context (HITL research findings) and incorporates
+        them into the synthesis prompt. Appends a draft summary entry
+        back to historical_context for rolling summarisation. Sets
+        report_version from hitl_iteration_count.
     """
     print("--- Synthesising final report ---")
 
@@ -24,7 +28,20 @@ def analyze_and_compare(state: IntelligenceState) -> dict:
     competitors = list(competitors_dict.values())
 
     # ------------------------------------------------------------------
-    # Build data-quality context from metadata
+    # historical and remediation context
+    # ------------------------------------------------------------------
+    messages = state.get("historical_context") or []
+    history = "\n\n".join(
+        str(m.content) if hasattr(m, "content") else str(m) for m in messages
+    )
+
+    remediation_messages = state.get("remediation_context") or []
+    remediation_text = "\n\n".join(
+        str(m.content) if hasattr(m, "content") else str(m) for m in remediation_messages
+    )
+
+    # ------------------------------------------------------------------
+    # data-quality context
     # ------------------------------------------------------------------
     stale_warnings: List[str] = []
     known_unknowns: List[str] = []
@@ -67,21 +84,24 @@ def analyze_and_compare(state: IntelligenceState) -> dict:
     prompt = ChatPromptTemplate.from_messages([
         (
             "system",
-            "You are a senior strategic analyst. Generate a competitive intelligence report "
-            "containing: an executive summary, a SWOT analysis for the target, and a "
-            "comparison entry for each competitor (overlapping features, differentiators, "
-            "target advantages, pricing delta, data_confidence). "
-            "Set data_confidence to 'known_unknown' where pricing or features are unknown, "
-            "'low' where stale or conflicting data was found, and 'high' otherwise. "
-            "Explicitly call out Known Unknowns and Stale Data in the report. "
-            "Be objective and concise.",
+            "You are a senior strategic analyst. Generate a competitive intelligence "
+            "report containing: an executive summary, a SWOT analysis for the target, "
+            "and a comparison entry for each competitor (overlapping features, "
+            "differentiators, target advantages, pricing delta, data_confidence). "
+            "Set data_confidence to 'known_unknown' where pricing or features are "
+            "unknown, 'low' where stale or conflicting data was found, and 'high' "
+            "otherwise. Incorporate feedback from prior review cycles and additional "
+            "research context when present. Explicitly call out Known Unknowns and "
+            "Stale Data. Be objective and concise.",
         ),
         (
             "user",
             "Target Company Profile:\n{target_profile}\n\n"
             "Competitor Profiles:\n{competitors_data}\n\n"
             "Stale Data Warnings:\n{stale_warnings_text}\n\n"
-            "Known Unknowns:\n{known_unknowns_text}\n",
+            "Known Unknowns:\n{known_unknowns_text}\n\n"
+            "Historical Context (prior drafts):\n{history}\n\n"
+            "Additional Research Context (HITL findings):\n{remediation_text}\n",
         ),
     ])
 
@@ -95,6 +115,8 @@ def analyze_and_compare(state: IntelligenceState) -> dict:
         "competitors_data": comps_input,
         "stale_warnings_text": stale_warnings_text,
         "known_unknowns_text": known_unknowns_text,
+        "history": history or "None.",
+        "remediation_text": remediation_text or "None.",
     })
 
     report: FinalReport = response["parsed"]
@@ -108,11 +130,23 @@ def analyze_and_compare(state: IntelligenceState) -> dict:
         )
 
     # ------------------------------------------------------------------
-    # Stamp data-quality fields onto the report
+    # stamp data-quality fields
     # ------------------------------------------------------------------
     report.stale_data_warnings = stale_warnings
     report.known_unknowns = known_unknowns
     report.synthesis_model_used = raw_msg.response_metadata.get("model_name", "gpt-4o")
 
-    print(f"--- Report synthesised using {report.synthesis_model_used} ---")
-    return {"final_report": report}
+    # ------------------------------------------------------------------
+    # stamp version; append draft entry to historical_context
+    # ------------------------------------------------------------------
+    report.report_version = state.get("hitl_iteration_count", 0) + 1
+
+    history_entry = AIMessage(
+        content=f"Draft v{report.report_version}: {report.executive_summary}"
+    )
+
+    print(f"--- Report v{report.report_version} synthesised using {report.synthesis_model_used} ---")
+    return {
+        "final_report": report,
+        "historical_context": messages + [history_entry],
+    }

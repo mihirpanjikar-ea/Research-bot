@@ -1,5 +1,7 @@
 from typing import Annotated, Dict, List, Literal, Optional, TypedDict
 
+from langchain_core.messages import BaseMessage
+from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field
 
 
@@ -54,6 +56,7 @@ class SWOTAnalysis(BaseModel):
 
 class FinalReport(BaseModel):
     executive_summary: str = ""
+    report_version: int = 1
     target_company: str = ""
     competitor_comparisons: List[CompetitorComparison] = Field(default_factory=list)
     swot: SWOTAnalysis = Field(default_factory=SWOTAnalysis)
@@ -73,3 +76,8 @@ class IntelligenceState(TypedDict):
     # parallel extraction fan-in (merged by reducer)
     competitors_data: Annotated[Dict[str, CompanyProfile], merge_competitors]
     final_report: Optional[FinalReport]
+    # HITL + rolling summarisation
+    historical_context: List[BaseMessage]        # plain list — replaced on each write
+    remediation_context: Annotated[List[BaseMessage], add_messages]  # accumulated per cycle
+    user_feedback: Optional[str]
+    hitl_iteration_count: int
