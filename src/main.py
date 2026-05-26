@@ -44,6 +44,8 @@ if __name__ == "__main__":
     initial_state = {
         "target_company_url": target_website,
         "target_profile": None,
+        "discovery_tracks": {},
+        "triage_fallback_attempts": 0,
         "competitor_urls": [],
         "competitors_data": {},
         "final_report": None,

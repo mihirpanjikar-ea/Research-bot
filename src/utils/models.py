@@ -1,6 +1,15 @@
-from typing import Dict, List, Optional, TypedDict
+from typing import Annotated, Dict, List, Optional, TypedDict
 
 from pydantic import BaseModel, Field
+
+
+def merge_dict(a: dict, b: dict) -> dict:
+    """Reducer that merges two dicts — used for discovery_tracks fan-out."""
+    if not a:
+        return b
+    if not b:
+        return a
+    return {**a, **b}
 
 
 class CompanyProfile(BaseModel):
@@ -38,6 +47,9 @@ class FinalReport(BaseModel):
 class IntelligenceState(TypedDict):
     target_company_url: str
     target_profile: Optional[CompanyProfile]
+    # Stage 3: parallel discovery tracks (merged by reducer)
+    discovery_tracks: Annotated[Dict[str, List[str]], merge_dict]
+    triage_fallback_attempts: int
     competitor_urls: List[str]
     competitors_data: Dict[str, CompanyProfile]
     final_report: Optional[FinalReport]
