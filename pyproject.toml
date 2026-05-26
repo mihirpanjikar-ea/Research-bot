@@ -1,0 +1,12 @@
+[project]
+name = "researc-bot"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "langchain-core>=1.4.0",
+    "langchain-exa>=1.1.0",
+    "langchain-openai>=1.2.2",
+    "langgraph>=1.2.1",
+]
