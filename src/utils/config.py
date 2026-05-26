@@ -11,6 +11,9 @@ MAX_PARALLEL_COMPETITORS = int(os.getenv("MAX_PARALLEL_COMPETITORS", 3))
 MAX_REMEDIATION_ATTEMPTS = int(os.getenv("MAX_REMEDIATION_ATTEMPTS", 2))
 MAX_HITL_ITERATIONS = int(os.getenv("MAX_HITL_ITERATIONS", 2))
 
+# Persistence
+SQLITE_DB_PATH = os.getenv("SQLITE_DB_PATH", "checkpoints.db")
+
 # Context Management (ARCH-01)
 MAX_HISTORY_TOKENS = int(os.getenv("MAX_HISTORY_TOKENS", 2048))
 MAX_HISTORY_CHARS = MAX_HISTORY_TOKENS * 4  # heuristic: 1 token ~= 4 chars
