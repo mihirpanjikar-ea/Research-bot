@@ -19,6 +19,10 @@ class CompanyProfile(BaseModel):
     target_audience: List[str] = Field(default_factory=list)
     key_features: List[str] = Field(default_factory=list)
     pricing_model: str = ""
+    # data-quality metadata
+    remediation_attempts: int = 0
+    stale_fields: List[str] = Field(default_factory=list)
+    conflict_fields: List[str] = Field(default_factory=list)
 
 
 class CompetitorComparison(BaseModel):
