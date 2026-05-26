@@ -121,6 +121,9 @@ def extract_competitor_data(url: str) -> CompanyProfile:
     chain_b = prompt_b | extraction_llm.with_structured_output(TrackBExtraction)
     try:
         extracted_b = chain_b.invoke({"url": url, "context": forum_content or "No content."})
+        # Some LLM chains may return plain dicts; ensure we have a TrackBExtraction instance
+        if isinstance(extracted_b, dict):
+            extracted_b = TrackBExtraction.model_validate(extracted_b)
     except Exception as e:
         print(f"Track B extraction failed for {url}: {e}")
         extracted_b = TrackBExtraction()
@@ -139,6 +142,9 @@ def extract_competitor_data(url: str) -> CompanyProfile:
     chain_a = prompt_a | extraction_llm.with_structured_output(TrackAExtraction)
     try:
         extracted_a = chain_a.invoke({"url": url, "context": site_content or "No content."})
+        # Normalize plain-dict outputs into the pydantic model for attribute access
+        if isinstance(extracted_a, dict):
+            extracted_a = TrackAExtraction.model_validate(extracted_a)
     except Exception as e:
         print(f"Track A extraction failed for {url}: {e}")
         extracted_a = TrackAExtraction()
@@ -172,21 +178,26 @@ def extract_competitor_data(url: str) -> CompanyProfile:
 # Graph nodes
 # ---------------------------------------------------------------------------
 
-def extract_competitors(state: IntelligenceState) -> dict:
-    """Sequentially run dual-track extraction on each competitor URL."""
-    urls = state.get("competitor_urls", [])
-    competitors_data: dict = {}
+def extract_competitor_node(state: dict) -> dict:
+    """
+    Single-URL extraction node — invoked once per competitor via the Send API.
 
-    for url in urls:
-        print(f"--- Extracting competitor: {url} ---")
-        try:
-            profile = extract_competitor_data(url)
-        except Exception as e:
-            print(f"Failed to extract {url}: {e}")
-            continue
-        competitors_data[url] = profile
+    Receives {"url": "<competitor_url>"} dispatched by route_triage.
+    Each parallel invocation is independent; results are merged into
+    competitors_data by the merge_competitors reducer.
+    """
+    url = state.get("url", "")
+    if not url:
+        return {"competitors_data": {}}
 
-    return {"competitors_data": competitors_data}
+    print(f"--- Extracting competitor: {url} ---")
+    try:
+        profile = extract_competitor_data(url)
+    except Exception as e:
+        print(f"Failed to extract {url}: {e}")
+        return {"competitors_data": {}}
+
+    return {"competitors_data": {url: profile}}
 
 
 def quality_gate_node(state: IntelligenceState) -> dict:

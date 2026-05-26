@@ -2,7 +2,7 @@ from langgraph.graph import StateGraph, START, END
 
 from .analysis_compare import analyze_and_compare
 from .domain_anchoring import domain_anchoring_node
-from .extract_competitor import extract_competitors, quality_gate_node
+from .extract_competitor import extract_competitor_node, quality_gate_node
 from .fetch_competitor import (
     route_triage,
     track_a_discovery_node,
@@ -24,14 +24,15 @@ def graph():
     workflow.add_node("anchor", domain_anchoring_node)
     workflow.add_node("scrape_target", fetch_target_company)
 
-    # Stage 3: parallel discovery
+    # parallel discovery
     workflow.add_node("discovery_a", track_a_discovery_node)
     workflow.add_node("discovery_b", track_b_discovery_node)
     workflow.add_node("discovery_c", track_c_discovery_node)
     workflow.add_node("triage", triage_node)
     workflow.add_node("triage_fallback", triage_fallback_node)
 
-    workflow.add_node("extract_competitors", extract_competitors)
+    # single-URL node, fanned out in parallel via Send API
+    workflow.add_node("extract_competitor", extract_competitor_node)
     # quality gate (bounded remediation + Known Unknown fallback)
     workflow.add_node("quality_gate", quality_gate_node)
     workflow.add_node("synthesize", analyze_and_compare)
@@ -53,15 +54,16 @@ def graph():
     workflow.add_edge("discovery_b", "triage")
     workflow.add_edge("discovery_c", "triage")
 
-    # Triage conditional: fallback loop or proceed
+    # Triage routing: fallback loop, skip-to-quality-gate, or parallel Send fan-out
     workflow.add_conditional_edges(
         "triage",
         route_triage,
-        {"fallback": "triage_fallback", "next": "extract_competitors"},
+        ["triage_fallback", "extract_competitor", "quality_gate"],
     )
     workflow.add_edge("triage_fallback", "triage")
 
-    workflow.add_edge("extract_competitors", "quality_gate")
+    # Fan-in: all parallel extract_competitor invocations merge into quality_gate
+    workflow.add_edge("extract_competitor", "quality_gate")
     workflow.add_edge("quality_gate", "synthesize")
     workflow.add_edge("synthesize", END)
 

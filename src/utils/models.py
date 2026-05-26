@@ -12,6 +12,15 @@ def merge_dict(a: dict, b: dict) -> dict:
     return {**a, **b}
 
 
+def merge_competitors(a: dict, b: dict) -> dict:
+    """Reducer that merges competitor profile dicts — used for parallel extraction fan-in."""
+    if not a:
+        return b
+    if not b:
+        return a
+    return {**a, **b}
+
+
 class CompanyProfile(BaseModel):
     name: str
     url: str
@@ -57,9 +66,10 @@ class FinalReport(BaseModel):
 class IntelligenceState(TypedDict):
     target_company_url: str
     target_profile: Optional[CompanyProfile]
-    # Stage 3: parallel discovery tracks (merged by reducer)
+    # parallel discovery tracks (merged by reducer)
     discovery_tracks: Annotated[Dict[str, List[str]], merge_dict]
     triage_fallback_attempts: int
     competitor_urls: List[str]
-    competitors_data: Dict[str, CompanyProfile]
+    # parallel extraction fan-in (merged by reducer)
+    competitors_data: Annotated[Dict[str, CompanyProfile], merge_competitors]
     final_report: Optional[FinalReport]

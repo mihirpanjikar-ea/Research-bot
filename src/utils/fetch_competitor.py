@@ -4,6 +4,7 @@ from urllib.parse import urlparse
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_exa import ExaFindSimilarResults, ExaSearchResults
+from langgraph.types import Send
 from pydantic import BaseModel, Field
 
 from .config import (
@@ -320,10 +321,21 @@ def triage_fallback_node(state: IntelligenceState) -> dict:
 # Routing
 # ---------------------------------------------------------------------------
 
-def route_triage(state: IntelligenceState) -> str:
-    """Fallback if triage found nothing and attempts are not exhausted."""
+def route_triage(state: IntelligenceState):
+    """
+    Three-way routing after triage:
+
+    1. No URLs + attempts remaining  -> "triage_fallback" (retry loop)
+    2. No URLs + attempts exhausted  -> "quality_gate"   (skip extraction gracefully)
+    3. URLs found                    -> [Send("extract_competitor", {"url": u}) ...]
+                                        (parallel fan-out, one Send per competitor)
+    """
     urls = state.get("competitor_urls", [])
     attempts = state.get("triage_fallback_attempts", 0)
     if not urls and attempts < MAX_TRIAGE_FALLBACK_ATTEMPTS:
-        return "fallback"
-    return "next"
+        return "triage_fallback"
+    if not urls:
+        print("--- Triage: no competitors found after fallback, skipping extraction ---")
+        return "quality_gate"
+    print(f"--- Triage: dispatching {len(urls)} competitor(s) in parallel ---")
+    return [Send("extract_competitor", {"url": url}) for url in urls]
