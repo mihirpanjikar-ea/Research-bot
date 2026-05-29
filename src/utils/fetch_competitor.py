@@ -325,7 +325,7 @@ def triage_fallback_node(state: IntelligenceState) -> dict:
 # Routing
 # ---------------------------------------------------------------------------
 
-def route_triage(state: IntelligenceState):
+def route_triage(state: IntelligenceState) -> str | list[Send]:
     """
     Three-way routing after triage:
 

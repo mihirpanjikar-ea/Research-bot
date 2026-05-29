@@ -3,7 +3,7 @@ from typing import List
 from langchain_core.messages import AIMessage
 from langchain_core.prompts import ChatPromptTemplate
 
-from .config import synthesis_llm
+from .config import synthesis_llm_fallback, synthesis_llm_primary
 from .models import FinalReport, IntelligenceState
 
 
@@ -105,7 +105,10 @@ def analyze_and_compare(state: IntelligenceState) -> dict:
         ),
     ])
 
-    chain = prompt | synthesis_llm.with_structured_output(FinalReport, include_raw=True)
+    # Build fallback at chain level so parse failures (not just API errors) trigger it.
+    _primary = prompt | synthesis_llm_primary.with_structured_output(FinalReport, include_raw=True)
+    _fallback = prompt | synthesis_llm_fallback.with_structured_output(FinalReport, include_raw=True)
+    chain = _primary.with_fallbacks([_fallback])
 
     target_input = target.model_dump() if target else "No target profile available"
     comps_input = [c.model_dump() for c in competitors]
@@ -129,17 +132,12 @@ def analyze_and_compare(state: IntelligenceState) -> dict:
             f"{raw_msg.content[:500] if hasattr(raw_msg, 'content') else raw_msg}"
         )
 
-    # ------------------------------------------------------------------
-    # stamp data-quality fields
-    # ------------------------------------------------------------------
-    report.stale_data_warnings = stale_warnings
-    report.known_unknowns = known_unknowns
-    report.synthesis_model_used = raw_msg.response_metadata.get("model_name", "gpt-4o")
-
-    # ------------------------------------------------------------------
-    # stamp version; append draft entry to historical_context
-    # ------------------------------------------------------------------
-    report.report_version = state.get("hitl_iteration_count", 0) + 1
+    report = report.model_copy(update={
+        "stale_data_warnings": stale_warnings,
+        "known_unknowns": known_unknowns,
+        "synthesis_model_used": raw_msg.response_metadata.get("model_name", "gpt-4o"),
+        "report_version": state.get("hitl_iteration_count", 0) + 1,
+    })
 
     history_entry = AIMessage(
         content=f"Draft v{report.report_version}: {report.executive_summary}"

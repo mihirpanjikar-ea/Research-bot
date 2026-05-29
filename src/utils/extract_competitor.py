@@ -1,5 +1,5 @@
 import datetime
-from typing import List, Optional
+from typing import List, Optional, TypedDict
 
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
@@ -176,7 +176,11 @@ def extract_competitor_data(url: str) -> CompanyProfile:
 # Graph nodes
 # ---------------------------------------------------------------------------
 
-def extract_competitor_node(state: dict) -> dict:
+class _ExtractPayload(TypedDict):
+    url: str
+
+
+def extract_competitor_node(state: _ExtractPayload) -> dict:
     """
     Single-URL extraction node — invoked once per competitor via the Send API.
 
@@ -239,18 +243,23 @@ def quality_gate_node(state: IntelligenceState) -> dict:
     extract_chain = extract_prompt | extraction_llm.with_structured_output(_MissingData)
 
     for url, profile in competitors_dict.items():
-        while profile.remediation_attempts < MAX_REMEDIATION_ATTEMPTS:
+        # Shadow mutable fields as locals — profile stays immutable throughout.
+        key_features = list(profile.key_features)
+        pricing_model = profile.pricing_model
+        attempts = profile.remediation_attempts
+
+        while attempts < MAX_REMEDIATION_ATTEMPTS:
             missing = []
-            if not profile.key_features:
+            if not key_features:
                 missing.append("key features")
-            if not profile.pricing_model:
+            if not pricing_model:
                 missing.append("pricing")
             if not missing:
                 break
 
             print(
                 f"--- Quality gate: remediating {url} "
-                f"(attempt {profile.remediation_attempts + 1}) "
+                f"(attempt {attempts + 1}) "
                 f"- missing: {missing} ---"
             )
 
@@ -276,25 +285,28 @@ def quality_gate_node(state: IntelligenceState) -> dict:
                     "missing": ", ".join(missing),
                     "context": context,
                 })
-                # Normalize plain-dict outputs into the pydantic model for attribute access
                 if isinstance(missing_data, dict):
                     missing_data = _MissingData.model_validate(missing_data)
 
-                if not profile.key_features and missing_data.key_features:
-                    profile.key_features = missing_data.key_features
-                if not profile.pricing_model and missing_data.pricing_model:
-                    profile.pricing_model = missing_data.pricing_model
+                if not key_features and missing_data.key_features:
+                    key_features = missing_data.key_features
+                if not pricing_model and missing_data.pricing_model:
+                    pricing_model = missing_data.pricing_model
             except Exception as e:
                 print(f"Remediation error for {url}: {e}")
 
-            profile.remediation_attempts += 1
+            attempts += 1
 
         # Known Unknown fallback — explicit gap marker for synthesis
-        if not profile.key_features:
-            profile.key_features = ["Known Unknown"]
-        if not profile.pricing_model:
-            profile.pricing_model = "Known Unknown"
+        if not key_features:
+            key_features = ["Known Unknown"]
+        if not pricing_model:
+            pricing_model = "Known Unknown"
 
-        updated[url] = profile
+        updated[url] = profile.model_copy(update={
+            "key_features": key_features,
+            "pricing_model": pricing_model,
+            "remediation_attempts": attempts,
+        })
 
     return {"competitors_data": updated}

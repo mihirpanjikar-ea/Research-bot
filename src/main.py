@@ -149,7 +149,11 @@ if __name__ == "__main__":
 
             # Resume the interrupted node — feedback becomes the return value of
             # interrupt() inside hitl_breakpoint_node, which writes it to user_feedback
-            app.invoke(Command(resume=feedback), config)
+            try:
+                app.invoke(Command(resume=feedback), config)
+            except Exception as e:
+                print(f"Error during research iteration: {e}")
+                break
 
         # Print the final approved report
         final_report = app.get_state(config).values.get("final_report")

@@ -1,11 +1,7 @@
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_exa import ExaSearchResults
 
+from .config import exa_search, extraction_llm
 from .models import CompanyProfile, IntelligenceState
-from .config import extraction_llm
-
-search_tool = ExaSearchResults()
-extraction_llm = extraction_llm
 
 
 def fetch_target_company(state: IntelligenceState) -> dict:
@@ -15,7 +11,7 @@ def fetch_target_company(state: IntelligenceState) -> dict:
 
     scrape_url = url if "://" in url else f"https://{url}"
 
-    response = search_tool.client.get_contents(
+    response = exa_search.client.get_contents(
         [scrape_url],
         text={"max_characters": 3000},
         subpages=5,

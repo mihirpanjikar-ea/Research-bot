@@ -1,6 +1,5 @@
 import os
 
-from dotenv import load_dotenv
 from langchain_exa import ExaFindSimilarResults, ExaSearchResults
 from langchain_openai import ChatOpenAI
 
@@ -28,7 +27,7 @@ exa_find_similar = ExaFindSimilarResults()
 # Shared extraction LLM (gpt-4o-mini, structured output)
 extraction_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
 
-# Synthesis LLM: gpt-4o primary with gpt-4o-mini fallback
-_primary_synthesis_llm = ChatOpenAI(model="gpt-4o", temperature=0)
-_fallback_synthesis_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
-synthesis_llm = _primary_synthesis_llm.with_fallbacks([_fallback_synthesis_llm])
+# Synthesis LLMs — exported individually so callers can build chain-level fallbacks
+# that fire on parse failures, not just API errors.
+synthesis_llm_primary = ChatOpenAI(model="gpt-4o", temperature=0)
+synthesis_llm_fallback = ChatOpenAI(model="gpt-4o-mini", temperature=0)
