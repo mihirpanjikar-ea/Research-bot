@@ -54,11 +54,9 @@ def graph(checkpointer=None):
     workflow.add_edge("anchor", "scrape_target")
 
     # Fan-out: scrape_target -> [discovery_a, discovery_b, discovery_c] in parallel
-    workflow.add_conditional_edges(
-        "scrape_target",
-        lambda _: ["discovery_a", "discovery_b", "discovery_c"],
-        ["discovery_a", "discovery_b", "discovery_c"],
-    )
+    workflow.add_edge("scrape_target", "discovery_a")
+    workflow.add_edge("scrape_target", "discovery_b")
+    workflow.add_edge("scrape_target", "discovery_c")
 
     # Fan-in: all three discovery tracks converge at triage
     workflow.add_edge("discovery_a", "triage")
