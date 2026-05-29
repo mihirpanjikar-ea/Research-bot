@@ -3,7 +3,6 @@ from typing import List
 from urllib.parse import urlparse
 
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_exa import ExaFindSimilarResults, ExaSearchResults
 from langgraph.types import Send
 from pydantic import BaseModel, Field
 
@@ -11,6 +10,8 @@ from .config import (
     MAX_PARALLEL_COMPETITORS,
     MAX_TRIAGE_FALLBACK_ATTEMPTS,
     RECENCY_CUTOFF_DAYS,
+    exa_find_similar,
+    exa_search,
     extraction_llm,
 )
 from .models import IntelligenceState
@@ -76,7 +77,7 @@ def track_a_discovery_node(state: IntelligenceState) -> dict:
     print(f"--- Track A (similarity) for: {search_url} ---")
 
     try:
-        response = ExaFindSimilarResults().invoke({
+        response = exa_find_similar.invoke({
             "url": search_url,
             "num_results": MAX_PARALLEL_COMPETITORS * 2,
             "exclude_source_domain": True,
@@ -118,7 +119,7 @@ def track_b_discovery_node(state: IntelligenceState) -> dict:
 
     urls: List[str] = []
     try:
-        response = ExaSearchResults().invoke({
+        response = exa_search.invoke({
             "query": query,
             "num_results": MAX_PARALLEL_COMPETITORS * 2,
             "type": "auto",
@@ -304,7 +305,7 @@ def triage_fallback_node(state: IntelligenceState) -> dict:
     print(f"--- Triage fallback attempt {attempts + 1} for: {target_name} ---")
 
     try:
-        response = ExaSearchResults().invoke({
+        response = exa_search.invoke({
             "query": f"list of competitors for {target_name}",
             "num_results": MAX_PARALLEL_COMPETITORS * 2,
             "type": "auto",

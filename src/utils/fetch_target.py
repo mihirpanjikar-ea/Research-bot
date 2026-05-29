@@ -1,11 +1,11 @@
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_exa import ExaSearchResults
-from langchain_openai import ChatOpenAI
 
 from .models import CompanyProfile, IntelligenceState
+from .config import extraction_llm
 
 search_tool = ExaSearchResults()
-extraction_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+extraction_llm = extraction_llm
 
 
 def fetch_target_company(state: IntelligenceState) -> dict:

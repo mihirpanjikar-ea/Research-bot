@@ -2,13 +2,13 @@ import datetime
 from typing import List, Optional
 
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_exa import ExaSearchResults
 from pydantic import BaseModel, Field
 
 from .config import (
     MAX_REMEDIATION_ATTEMPTS,
     RECENCY_CUTOFF_DAYS,
     STALE_SIGNAL_THRESHOLD_MONTHS,
+    exa_search,
     extraction_llm,
 )
 from .models import CompanyProfile, IntelligenceState
@@ -73,13 +73,11 @@ def extract_competitor_data(url: str) -> CompanyProfile:
         datetime.datetime.now() - datetime.timedelta(days=RECENCY_CUTOFF_DAYS)
     ).strftime("%Y-%m-%d")
 
-    exa = ExaSearchResults()
-
     # --- Track B: forums/reviews (recency-filtered) ---
     forum_query = f'"{url}" pricing OR features OR reviews'
     forum_content = ""
     try:
-        forum_res = exa.invoke({
+        forum_res = exa_search.invoke({
             "query": forum_query,
             "num_results": 3,
             "type": "auto",
@@ -96,7 +94,7 @@ def extract_competitor_data(url: str) -> CompanyProfile:
     # --- Track A: official site subpages ---
     site_content = ""
     try:
-        site_res = exa.client.get_contents(
+        site_res = exa_search.client.get_contents(
             [search_url],
             text={"max_characters": 3000},
             subpages=3,
@@ -262,7 +260,7 @@ def quality_gate_node(state: IntelligenceState) -> dict:
                     "url": profile.url,
                     "missing": ", ".join(missing),
                 })
-                search_res = ExaSearchResults().invoke({
+                search_res = exa_search.invoke({
                     "query": query_res.content,
                     "num_results": 3,
                     "type": "auto",

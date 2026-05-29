@@ -9,17 +9,17 @@ from .models import FinalReport, IntelligenceState
 
 def analyze_and_compare(state: IntelligenceState) -> dict:
     """
-        Synthesis pass: produce a structured FinalReport from target + competitor profiles.
+    Synthesis pass: produce a structured FinalReport from target + competitor profiles.
 
-        injects data-quality metadata (stale warnings, known unknowns,
-        conflict fields) into the prompt; stamps quality fields onto the
-        report; tracks which model executed via include_raw=True.
+    injects data-quality metadata (stale warnings, known unknowns,
+    conflict fields) into the prompt; stamps quality fields onto the
+    report; tracks which model executed via include_raw=True.
 
-        reads historical_context (prior draft summaries) and
-        remediation_context (HITL research findings) and incorporates
-        them into the synthesis prompt. Appends a draft summary entry
-        back to historical_context for rolling summarisation. Sets
-        report_version from hitl_iteration_count.
+    reads historical_context (prior draft summaries) and
+    remediation_context (HITL research findings) and incorporates
+    them into the synthesis prompt. Appends a draft summary entry
+    back to historical_context for rolling summarisation. Sets
+    report_version from hitl_iteration_count.
     """
     print("--- Synthesising final report ---")
 

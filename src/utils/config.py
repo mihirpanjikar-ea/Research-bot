@@ -1,6 +1,7 @@
 import os
 
 from dotenv import load_dotenv
+from langchain_exa import ExaFindSimilarResults, ExaSearchResults
 from langchain_openai import ChatOpenAI
 
 # Loop & Safety Limits
@@ -19,6 +20,10 @@ MAX_HISTORY_CHARS = MAX_HISTORY_TOKENS * 4  # heuristic: 1 token ~= 4 chars
 # Recency Filters
 RECENCY_CUTOFF_DAYS = int(os.getenv("RECENCY_CUTOFF_DAYS", 365))
 STALE_SIGNAL_THRESHOLD_MONTHS = int(os.getenv("STALE_SIGNAL_THRESHOLD_MONTHS", 18))
+
+# Shared Exa search tools
+exa_search = ExaSearchResults()
+exa_find_similar = ExaFindSimilarResults()
 
 # Shared extraction LLM (gpt-4o-mini, structured output)
 extraction_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)

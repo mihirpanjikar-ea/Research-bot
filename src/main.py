@@ -1,4 +1,5 @@
 import sqlite3
+import sys
 import uuid
 
 from dotenv import load_dotenv
@@ -122,7 +123,11 @@ if __name__ == "__main__":
         }
 
         # First run — graph halts inside hitl_breakpoint_node via interrupt()
-        app.invoke(initial_state, config)
+        try:
+            app.invoke(initial_state, config)
+        except ValueError as e:
+            print(f"Input rejected: {e}")
+            sys.exit(1)
 
         # HITL review loop — each iteration resumes the interrupted node via Command
         while True:

@@ -2,11 +2,10 @@ from typing import List
 
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_exa import ExaSearchResults
 from langgraph.types import interrupt
 from pydantic import BaseModel, Field
 
-from .config import MAX_HISTORY_CHARS, MAX_HITL_ITERATIONS, extraction_llm
+from .config import MAX_HISTORY_CHARS, MAX_HITL_ITERATIONS, exa_search, extraction_llm
 from .models import IntelligenceState
 
 
@@ -173,7 +172,7 @@ def iterative_research_node(state: IntelligenceState) -> dict:
     new_context_parts: List[str] = []
     for query in search_queries.queries:
         try:
-            res = ExaSearchResults().invoke({
+            res = exa_search.invoke({
                 "query": query,
                 "num_results": 2,
                 "type": "auto",
