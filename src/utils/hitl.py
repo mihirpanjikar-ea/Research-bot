@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 from .config import MAX_HISTORY_CHARS, MAX_HITL_ITERATIONS, exa_search, extraction_llm
 from .models import IntelligenceState
+from .observability import log_event, log_swallowed_exception
 
 
 # ---------------------------------------------------------------------------
@@ -34,9 +35,11 @@ def rolling_summarization_node(state: IntelligenceState) -> dict:
     if len(history_text) <= MAX_HISTORY_CHARS:
         return {}
 
-    print(
-        f"--- Rolling summarisation: compressing {len(messages)} message(s) "
-        f"({len(history_text)} chars > {MAX_HISTORY_CHARS} limit) ---"
+    log_event(
+        "summarize.compress",
+        message_count=len(messages),
+        chars=len(history_text),
+        limit=MAX_HISTORY_CHARS,
     )
 
     prompt = ChatPromptTemplate.from_messages([
@@ -59,7 +62,7 @@ def rolling_summarization_node(state: IntelligenceState) -> dict:
             ]
         }
     except Exception as e:
-        print(f"Rolling summarisation error: {e}")
+        log_swallowed_exception("summarize", e)
         return {}
 
 
@@ -109,10 +112,10 @@ def route_hitl(state: IntelligenceState) -> str:
     """
     feedback = (state.get("user_feedback") or "").strip()
     if not feedback or feedback.upper() == "APPROVED":
-        print("--- HITL: approved, finalising report ---")
+        log_event("hitl.approved")
         return "end"
     if state.get("hitl_iteration_count", 0) >= MAX_HITL_ITERATIONS:
-        print(f"--- HITL: iteration limit ({MAX_HITL_ITERATIONS}) reached, finalising ---")
+        log_event("hitl.limit_reached", limit=MAX_HITL_ITERATIONS)
         return "end"
     return "research"
 
@@ -143,9 +146,10 @@ def iterative_research_node(state: IntelligenceState) -> dict:
         return {"user_feedback": None}
 
     iteration = state.get("hitl_iteration_count", 0)
-    print(
-        f"--- HITL research: iteration {iteration + 1} | "
-        f"feedback: {feedback[:80]}{'...' if len(feedback) > 80 else ''} ---"
+    log_event(
+        "hitl.research.start",
+        iteration=iteration + 1,
+        feedback_preview=feedback[:80] + ("..." if len(feedback) > 80 else ""),
     )
 
     query_prompt = ChatPromptTemplate.from_messages([
@@ -166,7 +170,7 @@ def iterative_research_node(state: IntelligenceState) -> dict:
         else:
             search_queries = search_queries_result
     except Exception as e:
-        print(f"Query generation failed: {e}")
+        log_swallowed_exception("hitl.research.queries", e)
         search_queries = _SearchQueries()
 
     new_context_parts: List[str] = []
@@ -183,7 +187,7 @@ def iterative_research_node(state: IntelligenceState) -> dict:
                     f"URL: {item.url}\nContent:\n{getattr(item, 'text', '')[:1000]}..."
                 )
         except Exception as e:
-            print(f"Research search error for '{query}': {e}")
+            log_swallowed_exception("hitl.research.search", e, query=query)
 
     full_context = (
         "\n\n---\n\n".join(new_context_parts)

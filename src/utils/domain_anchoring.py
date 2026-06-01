@@ -1,6 +1,7 @@
 from urllib.parse import urlparse
 
 from .models import IntelligenceState
+from .observability import log_event
 
 
 def domain_anchoring_node(state: IntelligenceState) -> dict:
@@ -32,5 +33,5 @@ def domain_anchoring_node(state: IntelligenceState) -> dict:
     if netloc.startswith("www."):
         netloc = netloc[4:]
 
-    print(f"--- Domain anchored: {state['target_company_url']} -> {netloc} ---")
+    log_event("domain_anchored", before=state["target_company_url"], after=netloc)
     return {"target_company_url": netloc}

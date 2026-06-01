@@ -27,7 +27,8 @@ if __name__ == "__main__":
     try:
         checkpointer = SqliteSaver(conn)
         app = graph(checkpointer=checkpointer)
-        config = {"configurable": {"thread_id": str(uuid.uuid4())}}
+        thread_id = str(uuid.uuid4())
+        base_config = {"configurable": {"thread_id": thread_id}}
 
         initial_state = {
             "target_company_url": target_website,
@@ -43,16 +44,27 @@ if __name__ == "__main__":
             "hitl_iteration_count": 0,
         }
 
-        # First run — graph halts inside hitl_breakpoint_node via interrupt()
+        # First run — graph halts inside hitl_breakpoint_node via interrupt().
+        # Tag/metadata flow into LangSmith so the trace is searchable.
+        initial_config = {
+            **base_config,
+            "tags": ["research_bot", "initial_pass"],
+            "metadata": {
+                "thread_id": thread_id,
+                "target_url": target_website,
+                "phase": "initial",
+            },
+        }
         try:
-            app.invoke(initial_state, config)
+            app.invoke(initial_state, initial_config)
         except ValueError as e:
             print(f"Input rejected: {e}")
             sys.exit(1)
 
         # HITL review loop — each iteration resumes the interrupted node via Command
+        hitl_pass = 0
         while True:
-            snap = app.get_state(config)
+            snap = app.get_state(base_config)
 
             if not snap.next:
                 # Graph completed (approved or iteration limit reached)
@@ -67,17 +79,31 @@ if __name__ == "__main__":
 
             print()
             feedback = input("Feedback (or 'APPROVED' to finalise): ").strip()
+            hitl_pass += 1
 
             # Resume the interrupted node — feedback becomes the return value of
-            # interrupt() inside hitl_breakpoint_node, which writes it to user_feedback
+            # interrupt() inside hitl_breakpoint_node, which writes it to user_feedback.
+            # Attach feedback + iteration as run metadata so the LangSmith trace
+            # shows the input that bridged this pair of invocations.
+            resume_config = {
+                **base_config,
+                "tags": ["research_bot", "hitl_resume", f"hitl_pass_{hitl_pass}"],
+                "metadata": {
+                    "thread_id": thread_id,
+                    "target_url": target_website,
+                    "phase": "hitl_resume",
+                    "hitl_pass": hitl_pass,
+                    "hitl_feedback": feedback,
+                },
+            }
             try:
-                app.invoke(Command(resume=feedback), config)
+                app.invoke(Command(resume=feedback), resume_config)
             except Exception as e:
                 print(f"Error during research iteration: {e}")
                 break
 
         # Print the final approved report
-        final_report = app.get_state(config).values.get("final_report")
+        final_report = app.get_state(base_config).values.get("final_report")
         if final_report is None:
             print("\nNo report produced.")
         else:

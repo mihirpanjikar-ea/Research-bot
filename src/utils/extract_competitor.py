@@ -2,6 +2,7 @@ import datetime
 from typing import List, Optional, TypedDict
 
 from langchain_core.prompts import ChatPromptTemplate
+from langsmith import traceable
 from pydantic import BaseModel, Field
 
 from .config import (
@@ -12,6 +13,54 @@ from .config import (
     extraction_llm,
 )
 from .models import CompanyProfile, IntelligenceState
+from .observability import log_event, log_swallowed_exception
+
+
+@traceable(name="dual_track.merge", run_type="chain")
+def _merge_dual_track(
+    extracted_a: "TrackAExtraction", extracted_b: "TrackBExtraction"
+) -> dict:
+    """
+    Conflict resolution + feature union between Track A (official site) and
+    Track B (forums/reviews). Track A pricing wins; Track B fills only when A
+    is absent. Wrapped in @traceable so the pricing-precedence decision and
+    the union-vs-conflict outcome are visible in LangSmith.
+    """
+    conflict_fields: List[str] = []
+    if (
+        extracted_a.pricing_model
+        and extracted_b.pricing_model
+        and extracted_a.pricing_model != extracted_b.pricing_model
+    ):
+        conflict_fields.append("pricing_model")
+
+    merged_features = list(set(extracted_a.key_features + extracted_b.key_features))
+    final_pricing = extracted_a.pricing_model or extracted_b.pricing_model or ""
+
+    return {
+        "pricing_model": final_pricing,
+        "key_features": merged_features,
+        "conflict_fields": conflict_fields,
+    }
+
+
+@traceable(name="exa_get_contents.competitor", run_type="tool")
+def _scrape_competitor_subpages(search_url: str) -> str:
+    """
+    Track A direct SDK call — pricing/features/about subpages of one competitor.
+    Wrapped in @traceable so each per-competitor scrape lands in LangSmith as a
+    distinct tool run rather than vanishing inside extract_competitor_data.
+    """
+    site_res = exa_search.client.get_contents(
+        [search_url],
+        text={"max_characters": 3000},
+        subpages=3,
+        subpage_target=["pricing", "features", "about"],
+    )
+    return "".join(
+        f"URL: {res.url}\nContent:\n{getattr(res, 'text', '')[:1000]}...\n\n"
+        for res in site_res.results
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -89,23 +138,14 @@ def extract_competitor_data(url: str) -> CompanyProfile:
                 f"URL: {res.url}\nContent:\n{getattr(res, 'text', '')[:1000]}...\n\n"
             )
     except Exception as e:
-        print(f"Track B error for {url}: {e}")
+        log_swallowed_exception("extract.track_b", e, url=url)
 
     # --- Track A: official site subpages ---
     site_content = ""
     try:
-        site_res = exa_search.client.get_contents(
-            [search_url],
-            text={"max_characters": 3000},
-            subpages=3,
-            subpage_target=["pricing", "features", "about"],
-        )
-        for res in site_res.results:
-            site_content += (
-                f"URL: {res.url}\nContent:\n{getattr(res, 'text', '')[:1000]}...\n\n"
-            )
+        site_content = _scrape_competitor_subpages(search_url)
     except Exception as e:
-        print(f"Track A error for {url}: {e}")
+        log_swallowed_exception("extract.track_a", e, url=url)
 
     # --- Extract Track B ---
     prompt_b = ChatPromptTemplate.from_messages([
@@ -123,7 +163,7 @@ def extract_competitor_data(url: str) -> CompanyProfile:
         if isinstance(extracted_b, dict):
             extracted_b = TrackBExtraction.model_validate(extracted_b)
     except Exception as e:
-        print(f"Track B extraction failed for {url}: {e}")
+        log_swallowed_exception("extract.track_b.parse", e, url=url)
         extracted_b = TrackBExtraction()
 
     # --- Extract Track A with stale flagging ---
@@ -144,31 +184,21 @@ def extract_competitor_data(url: str) -> CompanyProfile:
         if isinstance(extracted_a, dict):
             extracted_a = TrackAExtraction.model_validate(extracted_a)
     except Exception as e:
-        print(f"Track A extraction failed for {url}: {e}")
+        log_swallowed_exception("extract.track_a.parse", e, url=url)
         extracted_a = TrackAExtraction()
 
     # --- Conflict resolution ---
-    conflict_fields: List[str] = []
-    if (
-        extracted_a.pricing_model
-        and extracted_b.pricing_model
-        and extracted_a.pricing_model != extracted_b.pricing_model
-    ):
-        conflict_fields.append("pricing_model")
-
-    merged_features = list(set(extracted_a.key_features + extracted_b.key_features))
-    # Track A pricing takes precedence; Track B fills gap when A is absent.
-    final_pricing = extracted_a.pricing_model or extracted_b.pricing_model or ""
+    merged = _merge_dual_track(extracted_a, extracted_b)
 
     return CompanyProfile(
         name=extracted_a.name or url,
         url=url,
         core_value_proposition=extracted_a.core_value_proposition,
         target_audience=extracted_a.target_audience,
-        key_features=merged_features,
-        pricing_model=final_pricing,
+        key_features=merged["key_features"],
+        pricing_model=merged["pricing_model"],
         stale_fields=extracted_a.stale_fields,
-        conflict_fields=conflict_fields,
+        conflict_fields=merged["conflict_fields"],
     )
 
 
@@ -192,11 +222,11 @@ def extract_competitor_node(state: _ExtractPayload) -> dict:
     if not url:
         return {"competitors_data": {}}
 
-    print(f"--- Extracting competitor: {url} ---")
+    log_event("extract_competitor.start", url=url)
     try:
         profile = extract_competitor_data(url)
     except Exception as e:
-        print(f"Failed to extract {url}: {e}")
+        log_swallowed_exception("extract_competitor", e, url=url)
         return {"competitors_data": {}}
 
     return {"competitors_data": {url: profile}}
@@ -257,10 +287,11 @@ def quality_gate_node(state: IntelligenceState) -> dict:
             if not missing:
                 break
 
-            print(
-                f"--- Quality gate: remediating {url} "
-                f"(attempt {attempts + 1}) "
-                f"- missing: {missing} ---"
+            log_event(
+                "quality_gate.remediate",
+                url=url,
+                attempt=attempts + 1,
+                missing=missing,
             )
 
             try:
@@ -293,7 +324,9 @@ def quality_gate_node(state: IntelligenceState) -> dict:
                 if not pricing_model and missing_data.pricing_model:
                     pricing_model = missing_data.pricing_model
             except Exception as e:
-                print(f"Remediation error for {url}: {e}")
+                log_swallowed_exception(
+                    "quality_gate.remediation", e, url=url, attempt=attempts + 1
+                )
 
             attempts += 1
 

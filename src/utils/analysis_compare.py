@@ -5,6 +5,7 @@ from langchain_core.prompts import ChatPromptTemplate
 
 from .config import synthesis_llm_fallback, synthesis_llm_primary
 from .models import FinalReport, IntelligenceState
+from .observability import log_event
 
 
 def analyze_and_compare(state: IntelligenceState) -> dict:
@@ -21,7 +22,7 @@ def analyze_and_compare(state: IntelligenceState) -> dict:
     back to historical_context for rolling summarisation. Sets
     report_version from hitl_iteration_count.
     """
-    print("--- Synthesising final report ---")
+    log_event("synthesis.start")
 
     target = state.get("target_profile")
     competitors_dict = state.get("competitors_data") or {}
@@ -143,7 +144,11 @@ def analyze_and_compare(state: IntelligenceState) -> dict:
         content=f"Draft v{report.report_version}: {report.executive_summary}"
     )
 
-    print(f"--- Report v{report.report_version} synthesised using {report.synthesis_model_used} ---")
+    log_event(
+        "synthesis.complete",
+        version=report.report_version,
+        model=report.synthesis_model_used,
+    )
     return {
         "final_report": report,
         "historical_context": messages + [history_entry],

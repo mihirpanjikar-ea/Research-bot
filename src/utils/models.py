@@ -2,9 +2,11 @@ from typing import Annotated, Dict, List, Literal, Optional, TypedDict
 
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
+from langsmith import traceable
 from pydantic import BaseModel, Field
 
 
+@traceable(name="reducer.discovery_tracks", run_type="chain")
 def merge_dict(a: dict, b: dict) -> dict:
     """Reducer that merges two dicts — used for discovery_tracks fan-out."""
     if not a:
@@ -14,6 +16,7 @@ def merge_dict(a: dict, b: dict) -> dict:
     return {**a, **b}
 
 
+@traceable(name="reducer.competitors_data", run_type="chain")
 def merge_competitors(a: dict, b: dict) -> dict:
     """Reducer that merges competitor profile dicts — used for parallel extraction fan-in."""
     if not a:

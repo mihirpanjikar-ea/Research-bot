@@ -4,6 +4,7 @@ from urllib.parse import urlparse
 
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.types import Send
+from langsmith import traceable
 from pydantic import BaseModel, Field
 
 from .config import (
@@ -15,6 +16,7 @@ from .config import (
     extraction_llm,
 )
 from .models import IntelligenceState
+from .observability import log_event, log_swallowed_exception
 
 
 # ---------------------------------------------------------------------------
@@ -74,7 +76,7 @@ def track_a_discovery_node(state: IntelligenceState) -> dict:
         return {"discovery_tracks": {"track_a": []}}
 
     search_url = url if "://" in url else f"https://{url}"
-    print(f"--- Track A (similarity) for: {search_url} ---")
+    log_event("discovery.track_a.start", url=search_url)
 
     try:
         response = exa_find_similar.invoke({
@@ -84,7 +86,7 @@ def track_a_discovery_node(state: IntelligenceState) -> dict:
         })
         urls = [r.url for r in response.results]
     except Exception as e:
-        print(f"Track A error: {e}")
+        log_swallowed_exception("discovery.track_a", e, url=search_url)
         urls = []
 
     return {"discovery_tracks": {"track_a": urls}}
@@ -115,7 +117,7 @@ def track_b_discovery_node(state: IntelligenceState) -> dict:
         datetime.datetime.now() - datetime.timedelta(days=RECENCY_CUTOFF_DAYS)
     ).strftime("%Y-%m-%d")
 
-    print(f"--- Track B (keyword) for: {target_name} ---")
+    log_event("discovery.track_b.start", target=target_name)
 
     urls: List[str] = []
     try:
@@ -147,7 +149,7 @@ def track_b_discovery_node(state: IntelligenceState) -> dict:
             extracted = chain.invoke({"name": target_name, "corpus": article_corpus})
             urls = (extracted.get("competitor_urls") or []) if isinstance(extracted, dict) else (extracted.competitor_urls or [])
     except Exception as e:
-        print(f"Track B error: {e}")
+        log_swallowed_exception("discovery.track_b", e, target=target_name)
 
     return {"discovery_tracks": {"track_b": urls}}
 
@@ -168,7 +170,7 @@ def track_c_discovery_node(state: IntelligenceState) -> dict:
     if not target_name:
         return {"discovery_tracks": {"track_c": []}}
 
-    print(f"--- Track C (LLM seed) for: {target_name} ---")
+    log_event("discovery.track_c.start", target=target_name)
 
     prompt = ChatPromptTemplate.from_messages([
         (
@@ -185,7 +187,7 @@ def track_c_discovery_node(state: IntelligenceState) -> dict:
         res = chain.invoke({"name": target_name})
         urls = res.get("competitor_urls", []) if isinstance(res, dict) else (res.competitor_urls or [])
     except Exception as e:
-        print(f"Track C error: {e}")
+        log_swallowed_exception("discovery.track_c", e, target=target_name)
         urls = []
 
     return {"discovery_tracks": {"track_c": urls}}
@@ -194,6 +196,52 @@ def track_c_discovery_node(state: IntelligenceState) -> dict:
 # ---------------------------------------------------------------------------
 # Triage
 # ---------------------------------------------------------------------------
+
+def _normalize_domain(url: str) -> str:
+    parsed = urlparse(url)
+    netloc = parsed.netloc or url.split("/")[0]
+    netloc = netloc.lower()
+    return netloc[4:] if netloc.startswith("www.") else netloc
+
+
+@traceable(name="triage.score_and_filter", run_type="chain")
+def _score_and_filter_candidates(
+    tracks: dict, target_url: str
+) -> List[dict]:
+    """
+    Pre-LLM triage step: union discovery tracks, drop the target itself,
+    filter noise domains, enforce Track-C corroboration, score by cross-track
+    overlap, sort. Wrapped in @traceable so the dropped candidates and the
+    surviving scored list are visible in LangSmith.
+    """
+    # Build scored map: normalized_domain -> {original_url, tracks seen in}
+    url_to_meta: dict = {}
+    for track_id, track_urls in tracks.items():
+        for url in (track_urls or []):
+            norm = _normalize_domain(url)
+            if not norm:
+                continue
+            # Skip exact domain match or subdomain of target (e.g. blog.target.com)
+            if norm == target_url or norm.endswith("." + target_url):
+                continue
+            if norm not in url_to_meta:
+                url_to_meta[norm] = {"original_url": url, "tracks": set()}
+            url_to_meta[norm]["tracks"].add(track_id)
+
+    scored = [
+        {
+            "url": meta["original_url"],
+            "norm": norm,
+            "score": len(meta["tracks"]),
+            "tracks": sorted(meta["tracks"]),  # set is not JSON-serialisable for LangSmith
+        }
+        for norm, meta in url_to_meta.items()
+        if not any(noise in norm for noise in _NOISE_DOMAINS)
+        and meta["tracks"] != {"track_c"}   # must be corroborated
+    ]
+    scored.sort(key=lambda x: x["score"], reverse=True)
+    return scored
+
 
 def triage_node(state: IntelligenceState) -> dict:
     """
@@ -204,42 +252,10 @@ def triage_node(state: IntelligenceState) -> dict:
     tracks = state.get("discovery_tracks", {})
     target_url = state.get("target_company_url", "").lower()
 
-    def normalize(url: str) -> str:
-        parsed = urlparse(url)
-        netloc = parsed.netloc or url.split("/")[0]
-        netloc = netloc.lower()
-        return netloc[4:] if netloc.startswith("www.") else netloc
-
-    # Build a scored map: normalized_domain -> {original_url, tracks seen in}
-    url_to_meta: dict = {}
-    for track_id, track_urls in tracks.items():
-        for url in (track_urls or []):
-            norm = normalize(url)
-            if not norm:
-                continue
-            # Skip exact domain match or subdomain of target (e.g. blog.target.com)
-            if norm == target_url or norm.endswith("." + target_url):
-                continue
-            if norm not in url_to_meta:
-                url_to_meta[norm] = {"original_url": url, "tracks": set()}
-            url_to_meta[norm]["tracks"].add(track_id)
-
-    # Filter noise + Track-C-only guard
-    scored = [
-        {
-            "url": meta["original_url"],
-            "norm": norm,
-            "score": len(meta["tracks"]),
-            "tracks": meta["tracks"],
-        }
-        for norm, meta in url_to_meta.items()
-        if not any(noise in norm for noise in _NOISE_DOMAINS)
-        and meta["tracks"] != {"track_c"}   # must be corroborated
-    ]
-    scored.sort(key=lambda x: x["score"], reverse=True)
+    scored = _score_and_filter_candidates(tracks, target_url)
 
     if not scored:
-        print("--- Triage: no candidates survived filtering ---")
+        log_event("triage.no_candidates")
         return {"competitor_urls": []}
 
     # LLM triage pass: remove tangential companies that survived the blocklist
@@ -271,7 +287,7 @@ def triage_node(state: IntelligenceState) -> dict:
         else:
             selected = decision.direct_competitor_urls[:MAX_PARALLEL_COMPETITORS]
     except Exception as e:
-        print(f"LLM triage failed, falling back to score-ranked list: {e}")
+        log_swallowed_exception("triage.llm", e, fallback="score_ranked")
         selected = [c["norm"] for c in scored[:MAX_PARALLEL_COMPETITORS]]
 
     # Normalize to https://domain roots and re-filter target (belt-and-suspenders).
@@ -281,12 +297,12 @@ def triage_node(state: IntelligenceState) -> dict:
     top_urls = []
     for url in selected:
         root = _to_root_url(url)
-        norm_check = normalize(root)
+        norm_check = _normalize_domain(root)
         if norm_check == target_url or norm_check.endswith("." + target_url):
             continue
         top_urls.append(root)
 
-    print(f"--- Triage selected {len(top_urls)} competitor(s): {top_urls} ---")
+    log_event("triage.selected", count=len(top_urls), urls=top_urls)
     return {"competitor_urls": top_urls}
 
 
@@ -302,7 +318,7 @@ def triage_fallback_node(state: IntelligenceState) -> dict:
         else state.get("target_company_url", "")
     )
     attempts = state.get("triage_fallback_attempts", 0)
-    print(f"--- Triage fallback attempt {attempts + 1} for: {target_name} ---")
+    log_event("triage.fallback.start", attempt=attempts + 1, target=target_name)
 
     try:
         response = exa_search.invoke({
@@ -312,7 +328,7 @@ def triage_fallback_node(state: IntelligenceState) -> dict:
         })
         urls = [res.url for res in response.results]
     except Exception as e:
-        print(f"Triage fallback error: {e}")
+        log_swallowed_exception("triage.fallback", e, target=target_name)
         urls = []
 
     return {
@@ -325,6 +341,20 @@ def triage_fallback_node(state: IntelligenceState) -> dict:
 # Routing
 # ---------------------------------------------------------------------------
 
+@traceable(name="route_triage", run_type="chain")
+def _route_triage_decision(urls: list, attempts: int) -> dict:
+    """
+    Pure-Python routing decision, traced so the branch (fallback / skip /
+    fan-out) and the number of Sends dispatched are visible in LangSmith.
+    Returns a metadata dict alongside the routing string for trace clarity.
+    """
+    if not urls and attempts < MAX_TRIAGE_FALLBACK_ATTEMPTS:
+        return {"branch": "triage_fallback", "send_count": 0}
+    if not urls:
+        return {"branch": "quality_gate", "send_count": 0}
+    return {"branch": "extract_competitor", "send_count": len(urls)}
+
+
 def route_triage(state: IntelligenceState) -> str | list[Send]:
     """
     Three-way routing after triage:
@@ -336,10 +366,13 @@ def route_triage(state: IntelligenceState) -> str | list[Send]:
     """
     urls = state.get("competitor_urls", [])
     attempts = state.get("triage_fallback_attempts", 0)
-    if not urls and attempts < MAX_TRIAGE_FALLBACK_ATTEMPTS:
+    decision = _route_triage_decision(urls, attempts)
+    branch = decision["branch"]
+
+    if branch == "triage_fallback":
         return "triage_fallback"
-    if not urls:
-        print("--- Triage: no competitors found after fallback, skipping extraction ---")
+    if branch == "quality_gate":
+        log_event("route_triage.skip_extraction")
         return "quality_gate"
-    print(f"--- Triage: dispatching {len(urls)} competitor(s) in parallel ---")
+    log_event("route_triage.dispatch", count=len(urls))
     return [Send("extract_competitor", {"url": url}) for url in urls]

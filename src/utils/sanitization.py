@@ -2,6 +2,7 @@ import re
 from urllib.parse import urlparse, urlunparse
 
 from .models import IntelligenceState
+from .observability import log_event
 
 # Characters / sequences that could break prompt structure or inject instructions
 _NEWLINE_RE = re.compile(r"[\r\n\x00-\x08\x0b\x0c\x0e-\x1f]")
@@ -68,6 +69,6 @@ def sanitization_node(state: IntelligenceState) -> dict:
     sanitized = urlunparse((parsed.scheme, netloc, path, "", "", ""))
 
     if sanitized != raw:
-        print(f"--- Sanitized URL: {raw!r} -> {sanitized!r} ---")
+        log_event("sanitize.rewrote", before=raw, after=sanitized)
 
     return {"target_company_url": sanitized}
